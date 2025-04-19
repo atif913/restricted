@@ -1,4 +1,5 @@
-# handlers.py
+ # handlers.py
+ # Auto‑deploy test: updated at $(date)
 
 import logging
 import asyncio
