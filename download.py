@@ -1,9 +1,5 @@
-# download.py
-
 import logging, asyncio, os
-from io import BytesIO
 from telethon.errors.rpcerrorlist import FloodWaitError
-from telethon.tl.types import DocumentAttributeVideo
 from tele_utils import get_user_client, load_all_dialogs, user_dialogs_cache
 from config import DOWNLOAD_DIR
 
@@ -12,11 +8,14 @@ task_queue = None
 send_queue = None
 
 async def download_worker():
-    # high concurrency
-    sem = asyncio.Semaphore(os.cpu_count() * 2 or 10)
-    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    # larger semaphore to allow more concurrent downloads: cpu_count×8
+    sem = asyncio.Semaphore(os.cpu_count() * 8 or 32)
 
     while True:
+        # autothrottle if uploads are lagging
+        if send_queue.qsize() > 50:
+            await asyncio.sleep(0.5)
+
         uid, cid, mid, priv = await task_queue.get()
         async with sem:
             logger.info(f"🛠 [Download] uid={uid} cid={cid} mid={mid} priv={priv}")
@@ -33,7 +32,7 @@ async def download_worker():
                 msg = await client.get_messages(entity, ids=mid)
             except FloodWaitError as e:
                 logger.warning(f"⚠️ FloodWait {e.seconds}s")
-                await asyncio.sleep(e.seconds+1)
+                await asyncio.sleep(e.seconds + 1)
                 task_queue.task_done()
                 continue
 
@@ -42,33 +41,25 @@ async def download_worker():
                 task_queue.task_done()
                 continue
 
-            # extract video metadata from API
             duration = getattr(msg.video, "duration", None)
             width    = getattr(msg.video, "w", getattr(msg.video, "width", None))
             height   = getattr(msg.video, "h", getattr(msg.video, "height", None))
 
-            # build in‑memory buffer with correct extension
-            buf = BytesIO()
-            if msg.video:
-                buf.name = f"{mid}.mp4"
-            elif msg.photo:
-                buf.name = f"{mid}.jpg"
-            else:
-                buf.name = getattr(msg.file, "name", str(mid))
-
+            # download directly to disk
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            ext = ".mp4" if msg.video else ".jpg" if msg.photo else ""
+            path = os.path.join(DOWNLOAD_DIR, f"{mid}{ext}")
             try:
-                await client.download_media(msg, buf)
-                buf.seek(0)
+                await client.download_media(msg, path)
             except Exception as e:
-                logger.error(f"❌ Stream download failed: {e}")
-                buf.close()
+                logger.error(f"❌ File download failed: {e}")
                 task_queue.task_done()
                 continue
 
             # enqueue for upload
             await send_queue.put({
                 "uid": uid,
-                "fileobj": buf,
+                "filepath": path,
                 "is_video": bool(msg.video),
                 "is_photo": bool(msg.photo),
                 "duration": duration,
@@ -76,6 +67,5 @@ async def download_worker():
                 "height": height,
                 "caption": msg.text or ""
             })
-            logger.info("🚀 Enqueued upload")
 
         task_queue.task_done()
