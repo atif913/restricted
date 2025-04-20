@@ -38,15 +38,35 @@ async def upload_worker(bot, send_queue):
 
             try:
                 if is_video:
+                    # ── generate thumbnail ─────────────────────────
+                    thumb = filepath + ".thumb.jpg"
+                    # grab a frame at 1 second
+                    os.system(f'ffmpeg -y -i "{filepath}" -ss 00:00:01 -vframes 1 "{thumb}"')
+
                     attr = DocumentAttributeVideo(
                         duration=int(dur or 0), w=int(w or 0), h=int(h or 0), supports_streaming=True
                     )
-                    kwargs = {"file": filepath, "caption": cap, "attributes": [attr], "force_document": False}
+                    kwargs = {
+                        "file": filepath,
+                        "caption": cap,
+                        "attributes": [attr],
+                        "thumbnail": thumb,
+                        "force_document": False
+                    }
                 elif is_photo:
-                    kwargs = {"file": filepath, "caption": cap, "force_document": False}
+                    kwargs = {
+                        "file": filepath,
+                        "caption": cap,
+                        "force_document": False
+                    }
                 else:
-                    kwargs = {"file": filepath, "caption": cap, "force_document": True}
+                    kwargs = {
+                        "file": filepath,
+                        "caption": cap,
+                        "force_document": True
+                    }
 
+                # send with flood-wait handling
                 while True:
                     try:
                         await bot.send_file(entity=uid, **kwargs)
@@ -61,9 +81,13 @@ async def upload_worker(bot, send_queue):
             except Exception as e:
                 logger.error(f"[UPLOAD ERROR] {e}", exc_info=True)
             finally:
-                # cleanup file
+                # cleanup files
                 if filepath and os.path.exists(filepath):
                     try: os.remove(filepath)
+                    except: pass
+                thumb = filepath + ".thumb.jpg"
+                if os.path.exists(thumb):
+                    try: os.remove(thumb)
                     except: pass
 
                 if waiting is not None:

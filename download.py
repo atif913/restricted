@@ -8,11 +8,11 @@ task_queue = None
 send_queue = None
 
 async def download_worker():
-    # larger semaphore to allow more concurrent downloads: cpu_count×8
+    # allow 8× concurrent tasks per CPU
     sem = asyncio.Semaphore(os.cpu_count() * 8 or 32)
 
     while True:
-        # autothrottle if uploads are lagging
+        # throttle if uploads are lagging
         if send_queue.qsize() > 50:
             await asyncio.sleep(0.5)
 
@@ -45,7 +45,7 @@ async def download_worker():
             width    = getattr(msg.video, "w", getattr(msg.video, "width", None))
             height   = getattr(msg.video, "h", getattr(msg.video, "height", None))
 
-            # download directly to disk
+            # ── download directly to disk ─────────────────────
             os.makedirs(DOWNLOAD_DIR, exist_ok=True)
             ext = ".mp4" if msg.video else ".jpg" if msg.photo else ""
             path = os.path.join(DOWNLOAD_DIR, f"{mid}{ext}")
@@ -56,7 +56,7 @@ async def download_worker():
                 task_queue.task_done()
                 continue
 
-            # enqueue for upload
+            # enqueue for upload by filepath
             await send_queue.put({
                 "uid": uid,
                 "filepath": path,

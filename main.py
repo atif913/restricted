@@ -30,24 +30,27 @@ async def main():
     await bot.start(bot_token=BOT_TOKEN)
     logger.info("✅ Bot connected successfully")
 
+    # start cleanup loop
     asyncio.create_task(cleanup_authorized())
     logger.info(f"🛡️  Started auth cleanup loop (every {SUB_CLEANUP_INTERVAL}s)")
 
+    # initialize queues
     import download
     download.task_queue = asyncio.Queue()
     download.send_queue = asyncio.Queue()
     logger.info("⚙️  Queues initialized")
 
+    # register handlers
     register_handlers(bot, download.task_queue, download.send_queue)
     logger.info("🔗 Handlers registered")
 
-    # Download workers: increase to saturate CPU & network
+    # launch many download workers
     dl_workers = WORKER_COUNT * 16
     for _ in range(dl_workers):
         asyncio.create_task(download_worker())
     logger.info(f"🚀 Launched {dl_workers} download workers")
 
-    # Upload workers: also increase
+    # launch upload workers
     ul_workers = WORKER_COUNT * 8
     for _ in range(ul_workers):
         asyncio.create_task(upload_worker(bot, download.send_queue))
